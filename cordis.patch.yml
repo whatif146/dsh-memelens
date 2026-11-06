@@ -1,0 +1,5 @@
+# 把 dsh-memelens 作为一层挂进 profile。
+# 只有声明了 dsh.bundle.patch 的包才会被 loader 当作 profile 层。
+- insert:
+    - id: dsh-memelens
+      name: dsh-memelens

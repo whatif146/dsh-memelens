@@ -1,9 +1,9 @@
 {
   "name": "dsh-memelens",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "Explain Chinese internet memes in context: what it means, where it came from, and how to reply. 给梗装个镜头。",
+  "description": "给 agent 装一双看懂梗的眼睛：解释中文表情包的意思、语气、出处与回复建议。BYOK，自带视觉模型。",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -11,7 +11,8 @@
     "meme",
     "表情包",
     "sticker",
-    "context"
+    "context",
+    "vision"
   ],
   "license": "MIT",
   "main": "src/index.js",

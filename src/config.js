@@ -46,22 +46,28 @@ function positiveNumber(value) {
  * 大多数国内厂商（豆包、智谱、Qwen、Kimi、SiliconFlow…）都提供
  * OpenAI 兼容的 /chat/completions，因此一个适配器就能覆盖绝大部分。
  * @param {any} raw
- * @returns {{ vision: VisionConfig | null }}
+ * @returns {{ vision: VisionConfig | null, memory: { halfLifeDays: number } }}
  */
 export function normalizeConfig(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
   const vision = source.vision && typeof source.vision === "object" ? source.vision : {};
+  const memory = source.memory && typeof source.memory === "object" ? source.memory : {};
+
+  const halfLifeDays = positiveNumber(memory.halfLifeDays) ?? 30;
 
   const baseURL = typeof vision.baseURL === "string" ? vision.baseURL.trim() : "";
   const apiKey = resolveSecret(vision.apiKey);
   const model = typeof vision.model === "string" ? vision.model.trim() : "";
 
+  const memoryConfig = { halfLifeDays };
+
   if (baseURL === "" || apiKey === "" || model === "") {
     // 三缺一就等于没配。返回 null 表示「该能力关闭」，而不是抛错。
-    return { vision: null };
+    return { vision: null, memory: memoryConfig };
   }
 
   return {
+    memory: memoryConfig,
     vision: {
       baseURL,
       apiKey,

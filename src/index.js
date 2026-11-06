@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { MemeStore } from "./store.js";
 import { explainMeme } from "./pipeline.js";
 import { normalizeConfig } from "./config.js";
+import { boundaryAdvice } from "./answer.js";
 
 const require_ = createRequire(import.meta.url);
 
@@ -58,30 +59,47 @@ const CONFIDENCE_LABELS = {
   unknown: "未知",
 };
 
+const LIFECYCLE_LABELS = {
+  rising: "正在火",
+  stable: "还在用",
+  fading: "在退潮",
+  dead: "基本没人用了",
+  unknown: "不确定",
+};
+
+/**
+ * 给人看的一眼摘要。细节留在结构化返回值里，由 agent 自己组织语言。
+ * 这里写太长会和 agent 的回复重复。
+ */
 function renderAnswer(result) {
   const { answer, meta } = result;
-  const lines = [];
 
-  if (answer.needsSetup === true) {
-    lines.push(answer.summary);
-    return lines.join("\n");
+  if (answer.needsSetup === true) return answer.summary;
+
+  const label = CONFIDENCE_LABELS[answer.confidence] ?? answer.confidence;
+  const first = [`表情包：${answer.summary}`];
+  if (answer.tone) first.push(`语气：${answer.tone}`);
+
+  const second = [];
+  const status = answer.lifecycle?.status;
+  if (status && status !== "unknown") {
+    second.push(`现在还能用吗：${LIFECYCLE_LABELS[status] ?? status}`);
   }
+  second.push(`置信度：${label}${meta.source === "memory" ? "（凭记忆，没花钱）" : ""}`);
 
-  const badge = meta.source === "cache" ? "（本地库命中，没花钱）" : "";
-  lines.push(`${answer.summary}${badge}`);
+  const lines = [first.join(" ｜ "), second.join(" ｜ ")];
 
-  if (answer.textOnImage) lines.push(`图上的字：「${answer.textOnImage}」`);
-  if (answer.memeName) lines.push(`梗名：${answer.memeName}`);
-  if (answer.tone) lines.push(`语气：${answer.tone}`);
-  if (Array.isArray(answer.usage) && answer.usage.length > 0) {
-    lines.push("别人一般这么用：");
-    for (const item of answer.usage) lines.push(`  · ${item}`);
+  const memeLine = answer.reply?.meme;
+  const plainLine = answer.reply?.plain;
+  if (memeLine || plainLine) {
+    const both = [];
+    if (memeLine) both.push(`玩梗：${memeLine}`);
+    if (plainLine) both.push(`不玩梗：${plainLine}`);
+    lines.push(both.join("　／　"));
   }
-  if (answer.reply) lines.push(`可以这样回：${answer.reply}`);
-
-  lines.push(`置信度：${CONFIDENCE_LABELS[answer.confidence] ?? answer.confidence}`);
-  if (answer.uncertainty) lines.push(`不确定的地方：${answer.uncertainty}`);
-  if (meta.stale) lines.push("注意：这条结论是半年前的，梗可能已经变味。");
+  if (answer.risk?.level === "high" || answer.confidence === "low") {
+    lines.push(`分寸：${boundaryAdvice(answer)}`);
+  }
 
   return lines.join("\n");
 }
@@ -93,16 +111,25 @@ function renderAnswer(result) {
 async function apply(ctx, rawConfig) {
   const config = normalizeConfig(rawConfig);
   const { defineTool } = await resolveHostPackage("@deepseek-ai/dsh-tools");
-  const store = new MemeStore(join(dataDir(), "index.jsonl"));
+  const store = new MemeStore(join(dataDir(), "index.jsonl"), {
+    halfLifeDays: config.memory.halfLifeDays,
+  });
+
+  // 启动时顺手做一次遗忘：又旧又弱的记忆直接删掉。
+  // 「学会忘记」不是隐喻，是每次启动都真的执行的一步。
+  void store.prune().catch(() => {});
 
   ctx.tools.register(
     defineTool({
       name: "meme_explain",
       description:
-        "解释一张中文网络表情包：它是什么意思、什么语气、对方大概想表达什么、可以怎么回。"
-        + "适用于看不懂聊天或评论区里的表情包时。输入是本地图片绝对路径或 http(s) 图片地址。",
+        "当用户在对话里贴了表情包、而你看不懂它想表达什么时调用。"
+        + "返回：图意、语气、来源与去处（这个梗从哪来、现在还能不能用）、"
+        + "可搭配/不可混用的梗、玩梗与不玩梗两版回复、冒犯风险、置信度。"
+        + "使用约定：confidence 为 low 或带 uncertainty 时必须如实转述，不要圆场；"
+        + "risk.level 为 high 时不要顺着玩这个梗；返回 needsSetup 时提示用户去配置视觉模型。",
       parameters: {
-        image: "string，本地图片绝对路径或 http(s) 地址",
+        image: "string，本地图片路径或 http(s) 地址；用户刚贴的图直接传其本地附件路径",
         replyContext: "可选，对方发这张图时的上下文原话，能显著提升语气判断",
       },
       output: {
